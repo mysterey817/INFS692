@@ -1,0 +1,227 @@
+---
+title: "MODEL 1 BAGGING"
+author: "REY P. PENDANG"
+date: "2022-12-16"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+# LOAD PACKAGES
+
+```{r,}
+library(dplyr)       # for data wrangling
+library(ggplot2)     # for awesome plotting
+library(doParallel)  # for parallel backend to foreach
+library(foreach)     # for parallel processing with for loops
+library(rsample)     # for creating our train-test splits
+library(tidyverse)   # for filtering 
+library(readr)       #load dataset
+library(caret)       # for general model fitting
+library(rpart)       # for fitting decision trees
+library(ipred)       # for fitting bagged decision trees
+library(ROCR)
+library(pROC)
+```
+
+
+# LOAD THE DATA SET
+
+```{r}
+set.seed(123) # for reproducibility
+dt<- read_csv("normalRad.csv")
+```
+
+# SPLIT TRAINING AND TESTING
+```{r}
+for_splitted  <-  sample(1:nrow(dt), round(nrow(dt) * 0.8))
+traindt <- dt[for_splitted,]
+radiomicsdata_test  <- dt[-for_splitted,]
+```
+
+# BAGGING
+
+```{r}
+set.seed(123)
+bagging_model1 <- bagging(
+  formula = Failure.binary ~ .,
+  data = traindt,
+  nbagg = 200,  
+  coob = TRUE,
+  control = rpart.control(minsplit = 2, cp = 0)
+)
+
+bagging_model1
+```
+Out-of-bag estimate of root mean squared error is 0.2945.
+
+
+## Bagging Model 2
+```{r, warning = FALSE}
+set.seed(123)
+bagging_model2 <- train(
+  Failure.binary ~ .,
+  data = traindt,
+  method = "treebag",
+  trControl = trainControl(method = "cv", number = 10),
+  nbagg = 200,  
+  control = rpart.control(minsplit = 2, cp = 0)
+)
+bagging_model2
+```
+Used 10 cross fold validation. And found out that the RMSE value is 0.2875. Using RMSE, the best model will have lowest RMSE. Thus, Bagging Model 2 is better than Bagging Model 1 since model 2 RMSE is 0.2875 which is less than 0.2945 in model 1. 
+
+
+This part will create a parallel socket cluster using 8.
+```{r}
+cl <- makeCluster(8)
+```
+
+Register the parallel backend.
+```{r}
+registerDoParallel(cl) 
+```
+
+
+```{r}
+predictions <- foreach(
+  icount(160), 
+  .packages = "rpart", 
+  .combine = cbind
+) %dopar% {
+  index <- sample(nrow(traindt), replace = TRUE)
+  trainDF_boot <- traindt[index, ]
+  bagged_tree <- rpart(
+    Failure.binary ~ ., 
+    control = rpart.control(minsplit = 2, cp = 0),
+    data = trainDF_boot
+  ) 
+  
+  predict(bagged_tree, newdata = radiomicsdata_test)
+}
+
+predictions[1:5, 1:7]
+```
+
+
+```{r}
+predictions %>%
+  as.data.frame() %>%
+  mutate(
+    observation = 1:n(),
+    actual = radiomicsdata_test$Failure.binary) %>%
+  tidyr::gather(tree, 
+                predicted, 
+                -c(observation, 
+                   actual)) %>%
+  group_by(observation) %>%
+  mutate(tree = stringr::str_extract(tree, '\\d+') %>% as.numeric()) %>%
+  ungroup() %>%
+  arrange(observation, tree) %>%
+  group_by(observation) %>%
+  mutate(avg_prediction = cummean(predicted)) %>%
+  group_by(tree) %>%
+  summarize(RMSE = RMSE(avg_prediction, actual)) %>%
+  ggplot(aes(tree, RMSE)) +
+  geom_line() +
+  xlab('Number of trees')
+
+
+```
+Error stabilizing graphat 50 to 75 number of trees which implies there is no gain for additional trees in making the model. 
+
+# Construct partial dependence plots
+```{r}
+plot_1 <- pdp::partial(
+  bagging_model2, 
+  pred.var = names(dt)[3],
+  grid.resolution = 20
+) %>% 
+  autoplot()
+
+plot_2 <- pdp::partial(
+  bagging_model2, 
+  pred.var = names(dt)[4], 
+  grid.resolution = 20
+) %>% 
+  autoplot()
+
+gridExtra::grid.arrange(plot_1, plot_2, nrow = 1)
+
+```
+
+
+```{r}
+traindt$Failure.binary=as.factor(traindt$Failure.binary)
+bagging_model2 <- train(
+  Failure.binary ~ .,
+  data = traindt,
+  method = "treebag",
+  trControl = trainControl(method = "cv", number = 10),
+  nbagg = 100,  
+  control = rpart.control(minsplit = 2, cp = 0)
+)
+# Shutdown parallel cluster
+stopCluster(cl)
+```
+
+
+# Compute predicted probabilities on training data
+```{r}
+pred_prob1 <- predict(bagging_model2, traindt, type = "prob")[,2]
+```
+
+# Compute AUC metrics for cv_model1,2 and 3 
+```{r}
+perf1 <- prediction(pred_prob1,traindt$Failure.binary) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+```
+
+
+# Plot ROC curves for cv_model1,2 and 3 
+```{r}
+plot(perf1, col = "black", lty = 2)
+```
+
+
+# ROC plot for training data
+```{r}
+roc( traindt$Failure.binary ~ pred_prob1, plot=TRUE, legacy.axes=FALSE, 
+    percent=TRUE, col="black", lwd=2, print.auc=TRUE)
+```
+
+
+# Compute predicted probabilities on training data
+```{r}
+pred_prob2 <- predict(bagging_model2, radiomicsdata_test, type = "prob")[,2]
+```
+
+
+# Compute AUC metrics for cv_model1,2 and 3 
+```{r}
+perf2 <- prediction(pred_prob2,radiomicsdata_test$Failure.binary) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+```
+
+
+
+# Plot ROC curves for cv_model1,2 and 3 
+```{r}
+plot(perf2, col = "black", lty = 2)
+```
+
+
+
+# ROC plot for training data
+```{r}
+roc( radiomicsdata_test$Failure.binary ~ pred_prob2, plot=TRUE, legacy.axes=FALSE, 
+    percent=TRUE, col="black", lwd=2, print.auc=TRUE)
+```
+
+
+```{r}
+vip::vip(bagging_model2, num_features = 20)
+```
+
+

@@ -1,0 +1,122 @@
+---
+title: "FINAL PRE-PROCESSED DATA"
+author: "REY P. PENDANG"
+date: "2022-12-16"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+pacman::p_load(tidyverse)
+pacman::p_load(bestNormalize)
+```
+```{r}
+df<- read_csv("radiomics_completedata.csv")
+View(df)
+head(df)
+```
+
+# Check for null and missing values
+Using *sum(is.n())*.function, We can determine if any missing values in our data.
+
+anyNA(rawd)
+
+#The result shows either *True* or *False*. If True, omit the missing values using *na.omit()*
+  
+#[1] FALSE
+
+#Thus, our data has no missing values.
+ 
+```{r}
+sum(is.na(df))
+```
+
+```{r,warning=F}
+dfs=df%>%select_if(is.numeric)
+dfs=dfs[,-1]
+df2=apply(dfs,2,function(x){ks.test(x,"pnorm")})
+```
+
+To have the list of p-value of all variables, the *unlist()* function is used and convert a list to vector.
+
+```{r}
+KS_list=unlist(lapply(df2, function(x) x$p.value))
+```
+
+
+```{r}
+sum(KS_list<0.05) # not normally distributed
+
+sum(KS_list>0.05) # normally distributed
+```
+# [1] 428
+# [1] 1
+
+#  Thus, we have 428 variables that are not normally distributed and Entropy_cooc.W.ADC is normally distributed.
+
+
+```{r}
+which.max(KS_list)
+```
+
+# Check for Normality of the Data
+We used *Shapiro-Wilk's Test* to check the normality of the data.
+
+
+```{r,warning=F}
+temdf=df[,c(3,5:length(names(df)))]
+
+temdf=apply(temdf,2,orderNorm)
+temdf=lapply(temdf, function(x) x$x.t)
+temdf=temdf%>%as.data.frame()
+test=apply(temdf,2,shapiro.test)
+test=unlist(lapply(test, function(x) x$p.value))
+```
+
+```{r,warning=F}
+sum(test>0.05) # not normally distributed
+```
+
+
+```{r,warning=F}
+sum(test<0.05) # not normally distributed
+```
+
+#[1] 0
+#[1] 428
+
+# Thus, base on the result above our data is normally distributed.
+
+```{r}
+df[,c(3,5:length(names(df)))]=temdf
+```
+
+# Getting the correlation of the whole data expect the categorical variables
+
+```{r}
+CorMatrix=cor(df[,-c(1,2)])
+heatmap(CorMatrix,Rowv=NA,Colv=NA,scale="none",revC = T)
+```
+
+# Split the data into training (80%) and testing (20%)
+
+```{r}
+df$Institution=as.factor(df$Institution)
+df$Failure.binary=as.factor(df$Failure.binary)
+```
+
+```{r}
+splitter <- sample(1:nrow(df), round(nrow(df) * 0.8))
+traindf <- df[splitter, ]
+testdf  <- df[-splitter, ]
+```
+
+```{r}
+splitter <- sample(1:nrow(DF), round(nrow(DF) * 0.8))
+trainDF <- DF[splitter, ]
+testDF  <- DF[-splitter, ]
+```
+
+
+

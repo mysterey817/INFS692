@@ -1,0 +1,161 @@
+---
+title: "MODEL 1 SUPPORT VECTOR MACHINE"
+author: "REY P. PENDANG"
+date: "2022-12-16"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+# Load Packages
+
+library(dplyr)    # for data wrangling
+library(readr)    #Load dataset
+library(ggplot2)  # for awesome graphics
+library(rsample)  # for data splitting
+library(caret)    # for classification and regression training
+library(kernlab)  # for fitting SVMs
+library(modeldata) #for Failure.binary data
+library(pdp)      # for partial dependence plots, etc.
+library(vip)      # for variable importance plots
+library(forcats)
+```
+
+# SUPPORT VECTOR MACHINE
+
+# Load the data set
+
+The data frame output of data reprocessing converted into to "csv", which will be used for entire project.
+
+
+```{r}
+dt <- read_csv("normalRad.CSV")
+View(dt)
+head(dt)
+
+# Load Failure.binary data
+
+dt$Failure.binary=as.factor(dt$Failure.binary)
+```
+
+# CREATING THE TRAINING (80%) AND TEST (20%) SETS
+
+```{r}
+set.seed(123)  # for reproducibility
+
+churn_split <- initial_split(dt, prop = 0.8, strata = "Failure.binary")
+split_train <- training(churn_split)
+split_test  <- testing(churn_split)
+```
+
+
+```{r}
+caret::getModelInfo("svmLinear")$svmLinear$parameters # Linear (i.e., soft margin classifier)
+
+
+caret::getModelInfo("svmPoly")$svmPoly$parameters # Polynomial kernel
+
+
+caret::getModelInfo("svmRadial")$svmRadial$parameters # Radial basis kernel
+```
+
+# RUNNING SUPPORT VECTOR MACHINE MODEL IN TRAINING PHASE
+
+Using **split_train**, we can tune an SVM model with radial basis kernel.
+
+```{r}
+set.seed(1854)  # for reproducibility
+split_svm <- train(
+  Failure.binary ~ ., 
+  data = split_train,
+  method = "svmRadial",               
+  preProcess = c("center", "scale"),  
+  trControl = trainControl(method = "cv", number = 10),
+  tuneLength = 10
+)
+```
+
+# PLOT AND PRINT SVM MODEL WITH WITH RADIAL BASIS KERNEL.
+
+```{r}
+# Plot results
+ggplot(split_svm) + theme_light()
+
+# Print results
+split_svm$results
+```
+
+# CONTROLING PARAMETER
+
+```{r}
+class.weights = c("No" = 1, "Yes" = 10)
+
+# Control params for SVM
+ctrl <- trainControl(
+  method = "cv", 
+  number = 10, 
+  classProbs = TRUE,                 
+  summaryFunction = twoClassSummary  # also needed for AUC/ROC
+)
+
+split_train$Failure.binary=fct_recode(split_train$Failure.binary,No="0",Yes="1")
+
+```
+
+# PRINTING THE AUC VALUES DURING TRAINING
+
+```{r}
+# Tune an SVM
+set.seed(5628)  # for reproducibility
+train_svm_auc <- train(
+  Failure.binary ~ ., 
+  data = split_train,
+  method = "svmRadial",               
+  preProcess = c("center", "scale"),  
+  metric = "ROC",  # area under ROC curve (AUC)       
+  trControl = ctrl,
+  tuneLength = 10
+)
+
+# Print the results
+train_svm_auc$results
+confusionMatrix(train_svm_auc)
+```
+
+# PRINTING THE TOP 20 IMPORTANT FEATURES DURING TRAINING
+
+```{r}
+prob_yes <- function(object, newdata) {
+  predict(object, newdata = newdata, type = "prob")[, "Yes"]
+}
+
+# Variable importance plot
+set.seed(2827)  # for reproducibility
+vip(train_svm_auc, method = "permute", nsim = 5, train = split_train, 
+    target = "Failure.binary", metric = "auc", reference_class = "Yes", 
+    pred_wrapper = prob_yes)
+```
+
+
+# PRINTING THE AUC VALUES DURING TESTING
+
+```{r}
+split_test$Failure.binary=fct_recode(split_test$Failure.binary,No="0",Yes="1")
+
+# Tune an SVM with radial 
+set.seed(5628)  # for reproducibility
+test_svm_auc <- train(
+  Failure.binary ~ ., 
+  data = split_test,
+  method = "svmRadial",               
+  preProcess = c("center", "scale"),  
+  metric = "ROC",  # area under ROC curve (AUC)       
+  trControl = ctrl,
+  tuneLength = 10
+)
+
+# Printing the results
+test_svm_auc$results
+confusionMatrix(test_svm_auc)
+```

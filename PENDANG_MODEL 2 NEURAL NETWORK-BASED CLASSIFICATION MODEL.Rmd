@@ -1,0 +1,144 @@
+---
+title: "MODEL 2 NEURAL NETWORK-BASED CLASSIFICATION MODEL"
+author: "REY P. PENDANG"
+date: "2022-12-16"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+# Helper packages
+
+library(dplyr)         # for data wrangling
+library(tidyverse)     # for filtering 
+library(readr)         # load dataset
+library(rsample)       # for creating validation splits
+library(bestNormalize) # for normalizing the dataset
+library(keras)         # for fitting DNNs
+library(tfruns)        # for additional grid search 
+library(tfestimators)  # provides grid search & model training interface
+library(tensorflow)
+```
+
+# Load the data set
+
+The data frame output of data reprocessing converted into to "csv", which will be used for entire project.
+
+```{r}
+dt <- read_csv("normalRad.CSV")
+View(dt)
+
+head(dt)
+```
+
+# Check for null and missing values
+Using *sum(is.n())*.function, We can determine if any missing values in our data.
+
+#The result shows either *True* or *False*. If True, omit the missing values using *na.omit()*
+  
+#[1] FALSE
+
+#Thus, our data has no missing values.
+ 
+```{r}
+sum(is.na(dt))
+```
+
+# Split the data into training (80%) and testing (20%)
+
+```{r}
+dt<-dt %>%
+  mutate(Failure.binary=ifelse(Failure.binary== "No",0,1))
+dt=dt[,-1]
+
+set.seed(123) # for reproducibility
+
+split = initial_split(dt,prop = 0.8 ,strata = "Failure.binary")
+churn_train <- training(split)
+churn_test  <- testing(split)
+
+X_train <- churn_train[,-c(1,2)]%>%as.matrix.data.frame()
+X_test <- churn_test[,-c(1,2)]%>%as.matrix.data.frame()
+y_train <- churn_train$Failure.binary
+y_test <- churn_test$Failure.binary
+```
+
+# Reshape the data set
+
+```{r}
+X_train <- array_reshape(X_train, c(nrow(X_train), ncol(X_train)))
+X_train <- X_train 
+
+X_test <- array_reshape(X_test, c(nrow(X_test), ncol(X_test)))
+X_test <- X_test 
+
+y_train <- to_categorical(y_train, num_classes = 2)
+y_test <- to_categorical(y_test, num_classes = 2)
+```
+
+# Run the model
+
+with the R function **keras_mod_sequential()** of keras package, allows us to create our network with a layering approach.First, we initiated our sequential feedforward DNN architecture with *keras_model_sequential()* and then added some dense layers.Hence, we created five hidden layers with 256, 128, 128, 64 and 64 neurons, we added the *sigmoid* activation function. Followed by an output layer with 2 nodes and specified activation = *softmax*.
+
+```{r}
+model <- keras_model_sequential() %>%
+  layer_dense(units = 256, activation = "sigmoid", input_shape = c(ncol(X_train))) %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 128, activation = "sigmoid") %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 128, activation = "sigmoid") %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 64, activation = "sigmoid") %>% 
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 64, activation = "sigmoid") %>% 
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 2, activation = "softmax")%>%
+ compile(
+    loss = "categorical_crossentropy",
+    optimizer = optimizer_rmsprop(),
+    metrics = c("accuracy")
+  )
+```
+
+# Model compile approach
+
+```{r}
+ model %>% compile(
+  loss = "categorical_crossentropy",
+  optimizer = optimizer_adam(),
+  metrics = c("accuracy")
+)
+```
+
+
+# Training the model
+
+ Already built a fundamental mod; all that remains is to feed it some data to train on. To achieve this, we input our training data and mod into a **fit()** function. 
+
+An epoch indicates how many times the algorithm views the entire dataset. Therefore, an epoch has ended whenever the algorithm has viewed all of the samples in the data set. Since a single epoch would be too large to transmit to the computer all at once, we divide it in several smaller batches.
+
+
+```{r}
+trainm <- model %>% 
+  fit(X_train, y_train, epochs = 10, batch_size = 128, validation_split = 0.15)
+
+trainm
+
+plot(trainm)
+```
+
+# Evaluate the trained model  using testing dataset 
+
+```{r}
+model %>%
+  evaluate(X_test, y_test)
+dim(X_test)
+dim(y_test)
+```
+
+# Model prediction using testing dataset
+
+```{r}
+model   %>% predict(X_test) %>% `>`(0.8) %>% k_cast("int32")
+```
